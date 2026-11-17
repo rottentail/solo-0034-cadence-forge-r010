@@ -39,6 +39,7 @@ type Sheet struct {
 	Name      string    `json:"name"`
 	Spans     []Span    `json:"spans"`
 	Cues      []Cue     `json:"cues"`
+	Adoption  string    `json:"silence_adoption,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 type Recipe struct {

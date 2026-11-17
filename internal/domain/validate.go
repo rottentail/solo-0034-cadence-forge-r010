@@ -74,8 +74,62 @@ func ValidateSheet(s Sheet, sources map[string]Source) error {
 	}
 	return nil
 }
+func ValidateSilenceAnalysis(a SilenceAnalysis) error {
+	switch a.State {
+	case AnalysisPending, AnalysisRunning, AnalysisReady, AnalysisFailed:
+	default:
+		return Invalid("analysis state is invalid")
+	}
+	if a.Revision < 1 {
+		return Invalid("analysis revision must be positive")
+	}
+	if len(a.SourceDigest) != 64 || a.SourceBytes <= 0 {
+		return Invalid("analysis must bind positive source bytes and a digest")
+	}
+	if a.ThresholdDB > 0 || a.ThresholdDB < -90 || a.SoftCeilingDB > 0 || a.SoftCeilingDB < a.ThresholdDB {
+		return Invalid("analysis level thresholds are invalid")
+	}
+	if a.MinSilenceMS < 50 || a.MinSilenceMS > 10000 || a.MinSoftMS < 20 || a.MinSoftMS > a.MinSilenceMS {
+		return Invalid("analysis minimum intervals are invalid")
+	}
+	if len(a.Candidates) > MaxSilenceCands {
+		return Invalid("analysis exceeds candidate bound")
+	}
+	previousEnd := int64(-1)
+	for i, c := range a.Candidates {
+		if c.Kind != CandidateSilence && c.Kind != CandidateSoftSpeech {
+			return Invalid("candidate %d kind is invalid", i)
+		}
+		if c.StartMS < 0 || c.EndMS <= c.StartMS || c.DurationMS != c.EndMS-c.StartMS {
+			return Invalid("candidate %d interval is invalid", i)
+		}
+		if c.StartMS < previousEnd {
+			return Invalid("candidate %d overlaps or is unsorted", i)
+		}
+		previousEnd = c.EndMS
+		if c.Suggested != SuggestionCut && c.Suggested != SuggestionTradeoff {
+			return Invalid("candidate %d suggestion is invalid", i)
+		}
+		if c.Kind == CandidateSoftSpeech && c.Suggested == SuggestionCut && (c.PeakDB == nil || c.MeanRMSDB == nil) {
+			return Invalid("candidate %d cannot cut unmeasured low-level speech", i)
+		}
+		if c.Kind == CandidateSilence && c.EndMS-c.StartMS < a.MinSilenceMS {
+			return Invalid("candidate %d is shorter than the silence minimum", i)
+		}
+		if c.Kind == CandidateSoftSpeech && c.EndMS-c.StartMS < a.MinSoftMS {
+			return Invalid("candidate %d is shorter than the soft-speech minimum", i)
+		}
+	}
+	if a.State == AnalysisReady && a.FinishedAt == nil {
+		return Invalid("ready analysis requires a finish time")
+	}
+	if a.State == AnalysisFailed && a.Error == "" {
+		return Invalid("failed analysis requires an error")
+	}
+	return nil
+}
 func ValidateState(s State) error {
-	if s.Schema != 1 || s.Sources == nil || s.Sheets == nil || s.Recipes == nil || s.Renders == nil {
+	if s.Schema != 1 || s.Sources == nil || s.Sheets == nil || s.Recipes == nil || s.Renders == nil || s.Analyses == nil {
 		return fmt.Errorf("unsupported or incomplete state schema")
 	}
 	for id, source := range s.Sources {
@@ -109,7 +163,54 @@ func ValidateState(s State) error {
 			}
 		}
 	}
+	for id, versions := range s.Analyses {
+		if len(versions) == 0 {
+			return fmt.Errorf("empty analysis history")
+		}
+		for i, v := range versions {
+			if v.SourceID != id || v.Revision != i+1 {
+				return fmt.Errorf("invalid analysis history")
+			}
+			if err := ValidateSilenceAnalysis(v); err != nil {
+				return err
+			}
+			source, ok := s.Sources[id]
+			if ok && (source.Digest != v.SourceDigest || source.Bytes != v.SourceBytes) {
+				return fmt.Errorf("analysis %s#%d is not bound to current source bytes", id, v.Revision)
+			}
+		}
+	}
 	keys := map[string]bool{}
+	for id, decision := range s.Adoptions {
+		sheet, ok := s.Sheets[decision.SheetID]
+		if !ok || id != decision.ID {
+			return fmt.Errorf("invalid adoption identity")
+		}
+		if decision.ResultRevision < 1 || decision.ResultRevision > len(sheet) {
+			return fmt.Errorf("invalid adoption result revision")
+		}
+		if decision.BaseRevision < 0 || decision.BaseRevision >= decision.ResultRevision {
+			return fmt.Errorf("invalid adoption base revision")
+		}
+		if sheet[decision.ResultRevision-1].Adoption != id {
+			return fmt.Errorf("adoption is not referenced by its sheet revision")
+		}
+		if sheet[decision.ResultRevision-1].Revision != decision.ResultRevision {
+			return fmt.Errorf("adoption revision drifted")
+		}
+		for _, ref := range decision.Analyses {
+			versions := s.Analyses[ref.SourceID]
+			if ref.Revision < 1 || ref.Revision > len(versions) {
+				return fmt.Errorf("adoption references unknown analysis")
+			}
+			if versions[ref.Revision-1].State != AnalysisReady {
+				return fmt.Errorf("adoption references an analysis that is not ready")
+			}
+			if versions[ref.Revision-1].SourceDigest != ref.SourceDigest || versions[ref.Revision-1].SourceBytes != ref.SourceBytes {
+				return fmt.Errorf("adoption analysis bytes drifted")
+			}
+		}
+	}
 	for id, r := range s.Renders {
 		if id != r.ID || keys[r.Key] {
 			return fmt.Errorf("invalid render identity")
@@ -131,6 +232,31 @@ func ValidateState(s State) error {
 		}
 		if err := ValidateRecipe(r.Recipe); err != nil {
 			return err
+		}
+		if r.Adoption != nil {
+			adoption, ok := s.Adoptions[r.Adoption.ID]
+			if !ok {
+				return fmt.Errorf("render references unknown silence adoption")
+			}
+			if adoption.SheetID != r.Sheet.ID || adoption.ResultRevision != r.Sheet.Revision {
+				return fmt.Errorf("render adoption does not match its frozen sheet")
+			}
+			if adoption.ResultFingerprint != SheetFingerprint(r.Sheet) {
+				return fmt.Errorf("render sheet drifted from its adoption")
+			}
+			if len(r.Silence) != len(adoption.Analyses) {
+				return fmt.Errorf("render analysis refs do not match its adoption")
+			}
+		}
+		for _, ref := range r.Silence {
+			versions := s.Analyses[ref.SourceID]
+			if ref.Revision < 1 || ref.Revision > len(versions) {
+				return fmt.Errorf("render references unknown silence analysis")
+			}
+			analysis := versions[ref.Revision-1]
+			if analysis.SourceDigest != ref.SourceDigest || analysis.SourceBytes != ref.SourceBytes {
+				return fmt.Errorf("render analysis bytes drifted")
+			}
 		}
 	}
 	var previous uint64

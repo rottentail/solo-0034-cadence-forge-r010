@@ -67,7 +67,11 @@ func (s *Service) RetireSource(id string) error {
 			}
 		}
 		delete(st.Sources, id)
-		st.Emit(id, "source.retired", "content retained for conservative reclamation")
+		// Sheet and render lineage are checked above; any analysis revision for
+		// this source is therefore unreferenced by an adoption and retires with
+		// the source record. Content-addressed bytes remain on disk.
+		delete(st.Analyses, id)
+		st.Emit(id, "source.retired", "content retained for conservative reclamation; unreferenced silence evidence retired")
 		return nil
 	})
 }

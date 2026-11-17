@@ -101,6 +101,41 @@
       "workflow_id": "events",
       "command": "python3 scripts/workflow_check.py --workflow events",
       "timeout_seconds": 120
+    },
+    {
+      "workflow_id": "silence-analysis",
+      "command": "python3 scripts/workflow_check.py --workflow silence-analysis",
+      "timeout_seconds": 180
+    },
+    {
+      "workflow_id": "silence-review",
+      "command": "python3 scripts/workflow_check.py --workflow silence-review",
+      "timeout_seconds": 180
+    },
+    {
+      "workflow_id": "silence-adopt",
+      "command": "python3 scripts/workflow_check.py --workflow silence-adopt",
+      "timeout_seconds": 180
+    },
+    {
+      "workflow_id": "silence-reanalysis",
+      "command": "python3 scripts/workflow_check.py --workflow silence-reanalysis",
+      "timeout_seconds": 180
+    },
+    {
+      "workflow_id": "silence-tradeoff",
+      "command": "python3 scripts/workflow_check.py --workflow silence-tradeoff",
+      "timeout_seconds": 180
+    },
+    {
+      "workflow_id": "silence-render",
+      "command": "python3 scripts/workflow_check.py --workflow silence-render",
+      "timeout_seconds": 180
+    },
+    {
+      "workflow_id": "silence-interrupt",
+      "command": "python3 scripts/workflow_check.py --workflow silence-interrupt",
+      "timeout_seconds": 180
     }
   ]
 }

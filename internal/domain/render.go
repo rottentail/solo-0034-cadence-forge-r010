@@ -28,6 +28,8 @@ type Render struct {
 	Recipe      Recipe            `json:"recipe"`
 	Sources     map[string]Source `json:"sources"`
 	Plan        Plan              `json:"plan"`
+	Silence     []AnalysisRef     `json:"silence_analyses,omitempty"`
+	Adoption    *Adoption         `json:"silence_adoption,omitempty"`
 	State       string            `json:"state"`
 	Attempts    []Attempt         `json:"attempts"`
 	Artifact    *Artifact         `json:"artifact,omitempty"`
@@ -42,17 +44,19 @@ type Event struct {
 	At       time.Time `json:"at"`
 }
 type State struct {
-	Schema   int                 `json:"schema"`
-	Sequence uint64              `json:"sequence"`
-	Sources  map[string]Source   `json:"sources"`
-	Sheets   map[string][]Sheet  `json:"sheets"`
-	Recipes  map[string][]Recipe `json:"recipes"`
-	Renders  map[string]Render   `json:"renders"`
-	Events   []Event             `json:"events"`
+	Schema    int                          `json:"schema"`
+	Sequence  uint64                       `json:"sequence"`
+	Sources   map[string]Source            `json:"sources"`
+	Sheets    map[string][]Sheet           `json:"sheets"`
+	Recipes   map[string][]Recipe          `json:"recipes"`
+	Analyses  map[string][]SilenceAnalysis `json:"silence_analyses"`
+	Adoptions map[string]Adoption          `json:"silence_adoptions"`
+	Renders   map[string]Render            `json:"renders"`
+	Events    []Event                      `json:"events"`
 }
 
 func Empty() State {
-	return State{Schema: 1, Sources: map[string]Source{}, Sheets: map[string][]Sheet{}, Recipes: map[string][]Recipe{}, Renders: map[string]Render{}, Events: []Event{}}
+	return State{Schema: 1, Sources: map[string]Source{}, Sheets: map[string][]Sheet{}, Recipes: map[string][]Recipe{}, Analyses: map[string][]SilenceAnalysis{}, Adoptions: map[string]Adoption{}, Renders: map[string]Render{}, Events: []Event{}}
 }
 func (s *State) Emit(id, kind, detail string) {
 	s.Sequence++

@@ -56,6 +56,11 @@
       "id": "configuration",
       "name": "部署参数与执行资源",
       "path": "internal/config"
+    },
+    {
+      "id": "silence",
+      "name": "静音证据、可采纳建议与取舍规划",
+      "path": "internal/silence"
     }
   ],
   "workflows": [
@@ -424,6 +429,152 @@
         "journal"
       ],
       "verification": "python3 scripts/workflow_check.py --workflow events"
+    },
+    {
+      "id": "silence-analysis",
+      "name": "silence-analysis",
+      "entry": "POST /forge/v1/sources/{id}/silence",
+      "success": "ready分析修订绑定源SHA-256与逐帧电平，静音与轻声区间分别标记",
+      "failure": "无音频或无可用帧时拒绝；分析失败不含候选",
+      "steps": [
+        "入口只登记pending修订并立即返回",
+        "分析工作者在独立claim中绑定源字节",
+        "逐帧峰值/RMS分组为数字静音与低电平语音",
+        "ready修订不可再改写"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "objects",
+        "media",
+        "domain",
+        "journal",
+        "silence"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow silence-analysis"
+    },
+    {
+      "id": "silence-review",
+      "name": "silence-review",
+      "entry": "POST /forge/v1/sheets/{id}/silence:propose?revision=N",
+      "success": "每个测量区间都有cut或keep判断、理由与可比较的四类取舍，含目标缺口提示",
+      "failure": "未ready的分析、字节不符或非法自定义量拒绝",
+      "steps": [
+        "冻结剪辑修订与分析修订",
+        "按保留停顿策略选择区间与删除量",
+        "重建片段并给出字幕影响",
+        "比较keep_all/silence_only/tighten_pauses/silence_and_soft_tails"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "domain",
+        "silence",
+        "timeline"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow silence-review"
+    },
+    {
+      "id": "silence-adopt",
+      "name": "silence-adopt",
+      "entry": "POST /forge/v1/sheets/{id}/silence:adopt",
+      "success": "新剪辑修订、采纳记录与分析字节引用在同一次耐久更新中提交",
+      "failure": "If-Match缺失返回400；过期修订返回409且不覆盖后续编辑",
+      "steps": [
+        "If-Match作为比较并交换的基修订",
+        "重新规划同一分析证据",
+        "确认结果满足片段、字幕与时间契约",
+        "追加修订并记录采纳与字幕影响"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "domain",
+        "journal",
+        "silence"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow silence-adopt"
+    },
+    {
+      "id": "silence-reanalysis",
+      "name": "silence-reanalysis",
+      "entry": "POST /forge/v1/sources/{id}/silence (second request)",
+      "success": "新分析追加修订，旧ready修订与其finished_at保持不变",
+      "failure": "历史上限32次后拒绝",
+      "steps": [
+        "再次登记pending修订",
+        "旧修订保持冻结",
+        "采纳仍可指向被审阅的旧修订"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "domain",
+        "journal",
+        "silence"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow silence-reanalysis"
+    },
+    {
+      "id": "silence-tradeoff",
+      "name": "silence-tradeoff",
+      "entry": "POST /forge/v1/sheets/{id}/silence:propose?revision=N",
+      "success": "纯静音不足时报告缺口、提供四类取舍，轻声词尾默认保留并可被显式取舍",
+      "failure": "超出可删量的自定义删除返回400",
+      "steps": [
+        "比较目标与可删静音",
+        "保留轻声并报告缺口",
+        "比较silence_and_soft_tails的代价",
+        "自定义逐区间决定可保留或裁剪"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "domain",
+        "silence"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow silence-tradeoff"
+    },
+    {
+      "id": "silence-render",
+      "name": "silence-render",
+      "entry": "POST /forge/v1/renders",
+      "success": "成片冻结采纳记录与分析字节引用，字幕由采纳片段派生",
+      "failure": "采纳与冻结剪辑不一致时状态校验拒绝",
+      "steps": [
+        "提交时冻结剪辑修订与采纳记录",
+        "成片记录分析字节溯源",
+        "字幕由冻结计划派生并随产物检验"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "domain",
+        "journal",
+        "encoding",
+        "inspection",
+        "captions"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow silence-render"
+    },
+    {
+      "id": "silence-interrupt",
+      "name": "silence-interrupt",
+      "entry": "restart after SIGKILL",
+      "success": "仅running分析变为failed/interrupted，ready修订与编辑安排保持可用",
+      "failure": "中断分析不暴露部分候选",
+      "steps": [
+        "SIGKILL终止分析进程",
+        "恢复仅重写running修订",
+        "旧ready修订仍可规划与采纳"
+      ],
+      "module_ids": [
+        "application",
+        "domain",
+        "journal",
+        "silence"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow silence-interrupt"
     }
   ],
   "complexity": {
@@ -447,7 +598,9 @@
       "recovery_rollback": "internal/journal/recovery.go:Recover",
       "time_semantics": "internal/timeline/plan.go:Build; internal/caption/map.go:Map",
       "idempotency": "internal/service/submit.go:Submit",
-      "snapshot_consistency": "internal/service/submit.go:Submit; internal/journal/store.go:Update"
+      "snapshot_consistency": "internal/service/submit.go:Submit; internal/journal/store.go:Update",
+      "policy_rules": "internal/silence/plan.go:Plan, selectCuts",
+      "lineage": "internal/service/adopt.go:AdoptSilence; internal/service/submit.go:Submit"
     }
   }
 }

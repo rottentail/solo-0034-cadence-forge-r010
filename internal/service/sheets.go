@@ -28,6 +28,9 @@ func (s *Service) SaveSheet(id string, expected int, input domain.Sheet) (domain
 		if err := domain.ValidateSheet(input, st.Sources); err != nil {
 			return err
 		}
+		if input.Adoption != "" {
+			return domain.Invalid("silence_adoption is assigned only by the adoption workflow")
+		}
 		input.ID = id
 		input.Revision = len(versions) + 1
 		input.CreatedAt = time.Now().UTC()

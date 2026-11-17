@@ -87,5 +87,23 @@ func (s *Service) Bundle(ctx context.Context, id string, dest io.Writer) error {
 		z.Close()
 		return err
 	}
+	if r.Adoption != nil {
+		trace, err := json.MarshalIndent(map[string]any{
+			"adoption": r.Adoption, "analyses": r.Silence, "sheet_revision": r.Sheet.Revision,
+		}, "", "  ")
+		if err != nil {
+			z.Close()
+			return err
+		}
+		w, err := z.Create("silence_trace.json")
+		if err != nil {
+			z.Close()
+			return err
+		}
+		if _, err = w.Write(trace); err != nil {
+			z.Close()
+			return err
+		}
+	}
 	return z.Close()
 }

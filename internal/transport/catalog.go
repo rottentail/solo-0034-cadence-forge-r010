@@ -52,6 +52,20 @@ func expected(r *http.Request) (int, error) {
 	}
 	return n, nil
 }
+
+// requiredRevision demands an explicit base revision. Adoption is a
+// compare-and-swap, so a missing header must not silently mean "revision 0".
+func requiredRevision(r *http.Request) (int, error) {
+	s := r.Header.Get("If-Match")
+	if s == "" {
+		return 0, domain.Invalid("If-Match with the base sheet revision is required")
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return 0, domain.Invalid("If-Match must be a positive revision")
+	}
+	return n, nil
+}
 func (a API) sheet(w http.ResponseWriter, r *http.Request) {
 	var input domain.Sheet
 	if err := decode(w, r, &input); err != nil {

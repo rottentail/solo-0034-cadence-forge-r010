@@ -22,6 +22,21 @@ func (s *Store) Recover() error {
 			st.Renders[id] = r
 			st.Emit(id, "render.interrupted", "explicit retry required; frozen input retained")
 		}
+		for sourceID, versions := range st.Analyses {
+			for index, analysis := range versions {
+				if analysis.State != domain.AnalysisRunning {
+					continue
+				}
+				now := time.Now().UTC()
+				analysis.State = domain.AnalysisFailed
+				analysis.Error = "analysis was interrupted by a process restart; request a new revision"
+				analysis.FinishedAt = &now
+				analysis.Candidates = []domain.SilenceCandidate{}
+				versions[index] = analysis
+				st.Emit(sourceID, "silence.interrupted", "explicit new revision required; earlier ready revisions are unchanged")
+			}
+			st.Analyses[sourceID] = versions
+		}
 		return nil
 	})
 }

@@ -67,9 +67,10 @@ func (s *Service) Submit(key string, request Request) (domain.Render, error) {
 			return err
 		}
 		plan.VTT = caption.VTT(caption.Map(sheet, plan))
+		analyses, adoption := adoptionsFor(*st, sheet)
 		now := time.Now().UTC()
 		id := ID()
-		out = domain.Render{ID: id, Key: key, RequestHash: fingerprint, Sheet: sheet, Recipe: recipe, Sources: sources, Plan: plan, State: "queued", Attempts: []domain.Attempt{}, CreatedAt: now, UpdatedAt: now}
+		out = domain.Render{ID: id, Key: key, RequestHash: fingerprint, Sheet: sheet, Recipe: recipe, Sources: sources, Plan: plan, Silence: analyses, Adoption: adoption, State: "queued", Attempts: []domain.Attempt{}, CreatedAt: now, UpdatedAt: now}
 		st.Renders[id] = out
 		st.Emit(id, "render.queued", "frozen source and recipe revisions")
 		return nil

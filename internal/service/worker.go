@@ -32,6 +32,9 @@ func (s *Service) loop(ctx context.Context) {
 			return
 		default:
 		}
+		if s.runPendingAnalysis(ctx) {
+			continue
+		}
 		runCtx, cancel := context.WithCancel(ctx)
 		r, ok, err := s.claim(cancel)
 		if err != nil {
@@ -54,6 +57,45 @@ func (s *Service) loop(ctx context.Context) {
 		}
 	}
 }
+
+// claimPendingAnalysis finds the oldest pending silence revision. Analysis and
+// rendering share workers but never share a queue: a long render must not hide
+// an analysis result, and a re-analysis must not disturb a frozen render.
+func (s *Service) claimPendingAnalysis() (string, int, bool) {
+	st, err := s.Store.Snapshot()
+	if err != nil {
+		slog.Error("inspect analysis queue", "error", err)
+		return "", 0, false
+	}
+	sourceID, revision := "", 0
+	var oldest time.Time
+	for id, versions := range st.Analyses {
+		for index, analysis := range versions {
+			if analysis.State != domain.AnalysisPending {
+				continue
+			}
+			if revision == 0 || analysis.RequestedAt.Before(oldest) || (analysis.RequestedAt.Equal(oldest) && id < sourceID) {
+				sourceID, revision, oldest = id, index+1, analysis.RequestedAt
+			}
+		}
+	}
+	return sourceID, revision, revision != 0
+}
+
+// runPendingAnalysis returns true only when this call actually did media work,
+// so a permanently unclaimable revision cannot turn the loop into a busy spin.
+func (s *Service) runPendingAnalysis(ctx context.Context) bool {
+	sourceID, revision, ok := s.claimPendingAnalysis()
+	if !ok {
+		return false
+	}
+	claimed, err := s.RunAnalysis(ctx, sourceID, revision)
+	if err != nil {
+		slog.Error("silence analysis", "source", sourceID, "revision", revision, "error", err)
+	}
+	return claimed
+}
+
 func (s *Service) claim(cancel context.CancelFunc) (domain.Render, bool, error) {
 	s.mutation.Lock()
 	defer s.mutation.Unlock()

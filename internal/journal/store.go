@@ -35,6 +35,16 @@ func Open(root string) (*Store, error) {
 	data, err := os.ReadFile(filepath.Join(root, "state.json"))
 	if err == nil {
 		err = json.Unmarshal(data, &s.state)
+		if err == nil {
+			// States written before silence evidence existed lack these maps;
+			// they are additive and carry no facts, so initialize them empty.
+			if s.state.Analyses == nil {
+				s.state.Analyses = map[string][]domain.SilenceAnalysis{}
+			}
+			if s.state.Adoptions == nil {
+				s.state.Adoptions = map[string]domain.Adoption{}
+			}
+		}
 	} else if os.IsNotExist(err) {
 		err = nil
 	}
